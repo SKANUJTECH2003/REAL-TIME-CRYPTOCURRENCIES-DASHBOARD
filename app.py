@@ -7,6 +7,7 @@ import time
 from textblob import TextBlob
 import random
 import numpy as np
+from streamlit_autorefresh import st_autorefresh
 
 # Page Configuration
 st.set_page_config(
@@ -149,7 +150,7 @@ def get_data(ticker: str, interval: str = "1d"):
                 st.warning(f"⚠️ No live data available for {ticker} - Using Demo Data")
                 st.info("💡 Yahoo Finance may be temporarily unavailable. Showing realistic demo data for illustration.")
                 data = generate_mock_data(ticker, period, interval)
-                return data
+                return data, False
             
             # Ensure data has required columns
             required_cols = ['Open', 'High', 'Low', 'Close']
@@ -157,7 +158,7 @@ def get_data(ticker: str, interval: str = "1d"):
                 st.error(f"❌ Invalid data format received for {ticker}")
                 return None
             
-            return data
+            return data, True
     
     except Exception as e:
         error_msg = str(e).lower()
@@ -175,7 +176,7 @@ def get_data(ticker: str, interval: str = "1d"):
         }
         period = period_map.get(interval, "1y")
         
-        return generate_mock_data(ticker, period, interval)
+        return generate_mock_data(ticker, period, interval), False
 
 
 # ==================== 2. SENTIMENT ANALYSIS FUNCTION ====================
@@ -376,13 +377,25 @@ def main():
         if st.button("🔄 Refresh Data", key="refresh_btn", use_container_width=True):
             st.cache_data.clear()
             st.rerun()
-    
+
     with col2:
         if st.button("🗑️ Clear All", key="clear_btn", use_container_width=True):
             st.cache_data.clear()
             st.session_state.clear()
             st.rerun()
-    
+
+    # Auto-refresh controls
+    st.sidebar.markdown("### 🔁 Auto-Refresh")
+    auto_refresh_enabled = st.sidebar.checkbox("Enable Auto-Refresh", value=False, key="auto_refresh_enabled")
+    refresh_option = st.sidebar.selectbox(
+        "Refresh Interval:", options=["30s", "60s", "120s", "300s"], index=1, key="auto_refresh_interval"
+    )
+    # Map option to milliseconds
+    interval_map = {"30s": 30_000, "60s": 60_000, "120s": 120_000, "300s": 300_000}
+    refresh_ms = interval_map.get(refresh_option, 60_000)
+    if auto_refresh_enabled:
+        st_autorefresh(interval=refresh_ms, key="auto_refresh")
+
     st.sidebar.markdown("---")
     
     # Troubleshooting section
@@ -422,10 +435,22 @@ def main():
     
     # ==================== MAIN CONTENT ====================
     
-    # Fetch data
-    data = get_data(ticker, selected_interval)
+    # Fetch data (returns tuple: data, is_live)
+    data, is_live = get_data(ticker, selected_interval)
     
     if data is not None:
+        # Data source badge
+        if is_live:
+            st.markdown(
+                "<div style='background:#063; color:#eafff2; padding:10px; border-radius:8px; width:280px;'><strong>LIVE DATA</strong> — fetched from Yahoo Finance</div>",
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                "<div style='background:#6b5b00; color:#fffbe6; padding:10px; border-radius:8px; width:320px;'><strong>DEMO DATA</strong> — generated locally (Yahoo unavailable)</div>",
+                unsafe_allow_html=True,
+            )
+        st.markdown("\n")
         # Display KPI Metrics
         st.subheader(f"📊 {selected_crypto} Market Metrics")
         display_kpi_metrics(data, ticker)
@@ -484,6 +509,22 @@ def main():
             <div style="text-align: center; color: #888888;">
                 <p>Last Updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
                 <p>Data refreshes every 5 minutes | Dashboard created with Streamlit & Plotly</p>
+                <p>Developed by: <strong>ANUJ KUMAR VISHWAKARMA</strong></p>
+                <p><a href="LICENSE" style="color: #00D4FF;">License: MIT</a></p>
+                <div style="margin-top:8px;">
+                    <a href="mailto:anujkumarvishwakarma313@gmail.com" target="_blank" rel="noopener noreferrer" style="margin:0 8px;">
+                        <img src="https://upload.wikimedia.org/wikipedia/commons/4/4e/Gmail_Icon.svg" width="28" height="28" style="filter:brightness(0) invert(1); vertical-align:middle;" alt="Email"/>
+                    </a>
+                    <a href="https://anuj-vishwakarma-portfolio.netlify.app" target="_blank" rel="noopener noreferrer" style="margin:0 8px;">
+                        <img src="https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/netlify.svg" width="28" height="28" style="filter:brightness(0) invert(1); vertical-align:middle;" alt="Portfolio"/>
+                    </a>
+                    <a href="https://www.linkedin.com/in/anuj-kumar-vishwakarma-a98535285/" target="_blank" rel="noopener noreferrer" style="margin:0 8px;">
+                        <img src="https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/linkedin.svg" width="28" height="28" style="filter:brightness(0) invert(1); vertical-align:middle;" alt="LinkedIn"/>
+                    </a>
+                    <a href="https://github.com/SKANUJTECH2003" target="_blank" rel="noopener noreferrer" style="margin:0 8px;">
+                        <img src="https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/github.svg" width="28" height="28" style="filter:brightness(0) invert(1); vertical-align:middle;" alt="GitHub"/>
+                    </a>
+                </div>
             </div>
             """,
             unsafe_allow_html=True
