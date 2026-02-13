@@ -7,7 +7,7 @@ import time
 from textblob import TextBlob
 import random
 import numpy as np
-from streamlit_autorefresh import st_autorefresh
+import requests
 
 # Page Configuration
 st.set_page_config(
@@ -79,6 +79,60 @@ def generate_mock_data(ticker: str, period: str = "1y", interval: str = "1d"):
     return df
 
 
+# ==================== COINGECKO API (LIVE DATA) ====================
+@st.cache_data(ttl=300)
+def get_coingecko_data(coin_id: str, days: int = 365):
+    """
+    Fetch cryptocurrency OHLC data from CoinGecko API (free, no auth needed).
+    
+    Args:
+        coin_id (str): CoinGecko coin ID (bitcoin, ethereum, solana)
+        days (int): Number of days of historical data
+    
+    Returns:
+        tuple: (DataFrame with OHLC data, True) or (None, False) on failure
+    """
+    try:
+        url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/ohlc?vs_currency=usd&days={days}"
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        
+        data = response.json()
+        
+        if not data or len(data) < 2:
+            return None, False
+        
+        # Parse OHLC data: each row is [timestamp_ms, open, high, low, close]
+        dates = []
+        opens = []
+        highs = []
+        lows = []
+        closes = []
+        
+        for candle in data:
+            timestamp_ms, open_val, high_val, low_val, close_val = candle
+            dates.append(datetime.fromtimestamp(timestamp_ms / 1000))
+            opens.append(open_val)
+            highs.append(high_val)
+            lows.append(low_val)
+            closes.append(close_val)
+        
+        # Create DataFrame
+        df = pd.DataFrame({
+            'Open': opens,
+            'High': highs,
+            'Low': lows,
+            'Close': closes,
+            'Volume': [np.random.uniform(1e9, 5e9) for _ in range(len(dates))]  # CoinGecko OHLC doesn't include volume
+        }, index=dates)
+        df.index.name = 'Date'
+        
+        return df, True
+    
+    except Exception as e:
+        return None, False
+
+
 # Custom CSS for dark theme and professional styling
 st.markdown("""
     <style>
@@ -119,19 +173,36 @@ st.markdown("""
 @st.cache_data(ttl=300)
 def get_data(ticker: str, interval: str = "1d"):
     """
-    Fetch cryptocurrency data from yfinance with error handling and caching.
-    Falls back to mock data if yfinance fails.
+    Fetch cryptocurrency data with multiple sources:
+    1. CoinGecko API (primary - free, reliable, live)
+    2. Yahoo Finance (fallback)
+    3. Mock data (final fallback)
     
     Args:
         ticker (str): Cryptocurrency ticker (e.g., 'BTC-USD')
         interval (str): Time interval (1m, 5m, 1h, 1d)
     
     Returns:
-        pd.DataFrame: Historical data or None if error occurs
+        tuple: (data DataFrame, is_live boolean)
     """
-    try:
-        with st.spinner(f"📊 Fetching {ticker} data..."):
-            # Determine period based on interval
+    # Map ticker to CoinGecko coin ID
+    coingecko_map = {
+        "BTC-USD": "bitcoin",
+        "ETH-USD": "ethereum",
+        "SOL-USD": "solana"
+    }
+    
+    coin_id = coingecko_map.get(ticker, None)
+    
+    with st.spinner(f"📊 Fetching {ticker} data..."):
+        # ===== Try CoinGecko API (PRIMARY - LIVE DATA) =====
+        if coin_id:
+            data, is_live = get_coingecko_data(coin_id, days=365)
+            if data is not None and not data.empty:
+                return data, is_live
+        
+        # ===== Fallback to Yahoo Finance =====
+        try:
             period_map = {
                 "1m": "7d",
                 "5m": "7d",
@@ -139,35 +210,18 @@ def get_data(ticker: str, interval: str = "1d"):
                 "1d": "1y"
             }
             period = period_map.get(interval, "1y")
-            
-            # Create ticker object
             tick = yf.Ticker(ticker)
-            
-            # Fetch historical data
             data = tick.history(period=period, interval=interval)
             
-            if data.empty:
-                st.warning(f"⚠️ No live data available for {ticker} - Using Demo Data")
-                st.info("💡 Yahoo Finance may be temporarily unavailable. Showing realistic demo data for illustration.")
-                data = generate_mock_data(ticker, period, interval)
-                return data, False
-            
-            # Ensure data has required columns
-            required_cols = ['Open', 'High', 'Low', 'Close']
-            if not all(col in data.columns for col in required_cols):
-                st.error(f"❌ Invalid data format received for {ticker}")
-                return None
-            
-            return data, True
-    
-    except Exception as e:
-        error_msg = str(e).lower()
+            if not data.empty:
+                required_cols = ['Open', 'High', 'Low', 'Close']
+                if all(col in data.columns for col in required_cols):
+                    return data, True
+        except Exception:
+            pass
         
-        # Show warning and use mock data
-        st.warning(f"⚠️ Cannot fetch live data for {ticker} - Using Demo Data")
-        st.info("💡 The app will continue with realistic demo data for illustration purposes.")
-        
-        # Generate and return mock data
+        # ===== Final Fallback: Mock Data =====
+        st.info("📊 Using realistic demo data (APIs temporarily unavailable)")
         period_map = {
             "1m": "7d",
             "5m": "7d",
@@ -175,7 +229,6 @@ def get_data(ticker: str, interval: str = "1d"):
             "1d": "1y"
         }
         period = period_map.get(interval, "1y")
-        
         return generate_mock_data(ticker, period, interval), False
 
 
@@ -390,11 +443,29 @@ def main():
     refresh_option = st.sidebar.selectbox(
         "Refresh Interval:", options=["30s", "60s", "120s", "300s"], index=1, key="auto_refresh_interval"
     )
-    # Map option to milliseconds
-    interval_map = {"30s": 30_000, "60s": 60_000, "120s": 120_000, "300s": 300_000}
-    refresh_ms = interval_map.get(refresh_option, 60_000)
+    # Map option to seconds
+    interval_map = {"30s": 30, "60s": 60, "120s": 120, "300s": 300}
+    refresh_sec = interval_map.get(refresh_option, 60)
+    
+    # Implement auto-refresh using Streamlit's native time-based rerun
     if auto_refresh_enabled:
-        st_autorefresh(interval=refresh_ms, key="auto_refresh")
+        if 'last_refresh' not in st.session_state:
+            st.session_state.last_refresh = time.time()
+        
+        current_time = time.time()
+        elapsed = current_time - st.session_state.last_refresh
+        
+        if elapsed >= refresh_sec:
+            st.session_state.last_refresh = current_time
+            st.cache_data.clear()
+            st.rerun()
+        
+        # Show countdown timer
+        remaining = int(refresh_sec - elapsed)
+        st.sidebar.caption(f"⏳ Refreshing in: {remaining}s")
+        # Trigger rerun after 1 second to update countdown
+        time.sleep(1)
+        st.rerun()
 
     st.sidebar.markdown("---")
     
