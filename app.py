@@ -194,34 +194,14 @@ def get_data(ticker: str, interval: str = "1d"):
     
     coin_id = coingecko_map.get(ticker, None)
     
-    with st.spinner(f"📊 Fetching {ticker} data..."):
-        # ===== Try CoinGecko API (PRIMARY - LIVE DATA) =====
-        if coin_id:
-            data, is_live = get_coingecko_data(coin_id, days=365)
-            if data is not None and not data.empty:
-                return data, is_live
-        
-        # ===== Fallback to Yahoo Finance =====
-        try:
-            period_map = {
-                "1m": "7d",
-                "5m": "7d",
-                "1h": "60d",
-                "1d": "1y"
-            }
-            period = period_map.get(interval, "1y")
-            tick = yf.Ticker(ticker)
-            data = tick.history(period=period, interval=interval)
-            
-            if not data.empty:
-                required_cols = ['Open', 'High', 'Low', 'Close']
-                if all(col in data.columns for col in required_cols):
-                    return data, True
-        except Exception:
-            pass
-        
-        # ===== Final Fallback: Mock Data =====
-        st.info("📊 Using realistic demo data (APIs temporarily unavailable)")
+    # ===== Try CoinGecko API (PRIMARY - LIVE DATA) =====
+    if coin_id:
+        data, is_live = get_coingecko_data(coin_id, days=365)
+        if data is not None and not data.empty:
+            return data, is_live
+    
+    # ===== Fallback to Yahoo Finance =====
+    try:
         period_map = {
             "1m": "7d",
             "5m": "7d",
@@ -229,7 +209,25 @@ def get_data(ticker: str, interval: str = "1d"):
             "1d": "1y"
         }
         period = period_map.get(interval, "1y")
-        return generate_mock_data(ticker, period, interval), False
+        tick = yf.Ticker(ticker)
+        data = tick.history(period=period, interval=interval)
+        
+        if not data.empty:
+            required_cols = ['Open', 'High', 'Low', 'Close']
+            if all(col in data.columns for col in required_cols):
+                return data, True
+    except Exception:
+        pass
+    
+    # ===== Final Fallback: Mock Data =====
+    period_map = {
+        "1m": "7d",
+        "5m": "7d",
+        "1h": "60d",
+        "1d": "1y"
+    }
+    period = period_map.get(interval, "1y")
+    return generate_mock_data(ticker, period, interval), False
 
 
 # ==================== 2. SENTIMENT ANALYSIS FUNCTION ====================
@@ -507,7 +505,8 @@ def main():
     # ==================== MAIN CONTENT ====================
     
     # Fetch data (returns tuple: data, is_live)
-    data, is_live = get_data(ticker, selected_interval)
+    with st.spinner(f"📊 Fetching {selected_crypto} data..."):
+        data, is_live = get_data(ticker, selected_interval)
     
     if data is not None:
         # Data source badge
