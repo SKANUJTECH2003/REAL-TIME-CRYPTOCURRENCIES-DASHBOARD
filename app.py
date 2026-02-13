@@ -8,6 +8,13 @@ from textblob import TextBlob
 import random
 import numpy as np
 import requests
+import nltk
+try:
+    nltk.data.find('tokenizers/punkt')
+except LookupError:
+    nltk.download('punkt')
+    nltk.download('brown')
+    nltk.download('punkt_tab')
 
 # Page Configuration
 st.set_page_config(
